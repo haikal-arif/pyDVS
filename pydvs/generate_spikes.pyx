@@ -582,17 +582,17 @@ def render_frame(np.ndarray[DTYPE_t, ndim=2] spikes,
   """
   cdef np.ndarray[DTYPE_U8_t, ndim=3] spikes_frame = np.zeros([height, width, 3], dtype=DTYPE_U8)
   cdef np.ndarray[Py_ssize_t, ndim=1] rows, cols
-  spikes_frame[:, :, 0] = curr_frame
-  spikes_frame[:, :, 1] = curr_frame
-  spikes_frame[:, :, 2] = curr_frame
+  spikes_frame[:, :, 0] = np.zeros_like(curr_frame)
+  spikes_frame[:, :, 1] = np.zeros_like(curr_frame)
+  spikes_frame[:, :, 2] = np.zeros_like(curr_frame)
 
   if polarity == RECTIFIED_POLARITY:
     rows, cols = np.where(spikes != 0)
-    spikes_frame[rows, cols, :] = [0, 255, 0]
+    spikes_frame[rows, cols, :] = [255, 0, 0]
 
   if polarity == UP_POLARITY or polarity == MERGED_POLARITY:
     rows, cols = np.where(spikes > 0)
-    spikes_frame[rows, cols, :] = [0, 255, 0]
+    spikes_frame[rows, cols, :] = [255, 0, 0]
 
   if polarity == DOWN_POLARITY or polarity == MERGED_POLARITY:
     rows, cols = np.where(spikes < 0)
