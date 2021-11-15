@@ -46,7 +46,8 @@ IMAGE_TYPES = ["png", 'jpeg', 'jpg']
 # -------------------------------------------------------------------- #
 # process image thread function                                        #
 
-def processing_thread(img_queue, spike_queue, running, max_time_ms):
+def processing_thread(img_queue, spike_queue, running, 
+                      max_time_ms, save=False, write_queue=None):
   #~ start_time = time.time()
   WINDOW_NAME = 'spikes'
   cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
@@ -115,7 +116,9 @@ def processing_thread(img_queue, spike_queue, running, max_time_ms):
     spk_img[:] = gs.render_frame(spikes, img, cam_res, cam_res, polarity)
     # print("after render_frame")
 
-    cv2.imshow (WINDOW_NAME, spk_img.astype(uint8))
+    cv2.imshow(WINDOW_NAME, spk_img.astype(uint8))
+    if save:
+      write_queue.put(spk_img.astype(uint8))
     if cv2.waitKey(1) & 0xFF == ord('q'):
       running.value = 0
       break
@@ -152,12 +155,24 @@ def emitting_thread(spike_queue, running):
 
   running.value = 0
 
+# -------------------------------------------------------------------- #
+# Write video function
+def writing_thread(write_queue, fps):
+  fourcc = cv2.VideoWriter_fourcc(*'XVID')
+  out = cv2.VideoWriter('output/output.avi',fourcc, fps, (width, height))
+  while True:
+    img = write_queue.get()
+    if img is None:
+      break
+    # cv2.imwrite(f'output/img-{i:03d}.jpg', img)
+    out.write(img)
+  out.release()
 
 
 #----------------------------------------------------------------------#
 # global variables                                                     #
 
-mode = MODE_32
+mode = 256
 cam_res = int(mode)
 #cam_res = 256 <- can be done, but spynnaker doesn't suppor such resolution
 width = cam_res # square output
@@ -180,17 +195,20 @@ max_threshold = 180 # 12*15 ~ 0.7*255
 inh_width = 2
 is_inh_on = True
 inh_coords = gs.generate_inh_coords(width, height, inh_width)
-behaviour = VirtualCam.BEHAVE_ATTENTION
+behaviour = BEHAVE_FADE
+
+
 
 def main():
   # -------------------------------------------------------------------- #
   # camera/frequency related                                             #
-  
+  save = True
   fps = 90
   max_cycles = 2
   max_time_ms = int(1000./fps)
-
-  video_dev = VirtualCam("./mnist/t10k/", fps=fps, resolution=cam_res, behaviour=behaviour, max_cycles=max_cycles)
+  video_dev = VirtualCam("mnist/t10k", fps=fps, resolution=cam_res, 
+    behaviour=behaviour, max_cycles=max_cycles, fade_with_mask=False
+    )
   
   
   # -------------------------------------------------------------------- #
@@ -204,32 +222,40 @@ def main():
   spike_emitting_proc.start()
   
   img_queue = Queue()
+  write_queue = Queue()
   #~ spike_gen_proc = Process(target=self.process_frame, args=(img_queue,))
   spike_gen_proc = Process(target=processing_thread,
-                           args=(img_queue, spike_queue, running, max_time_ms))
+                           args=(img_queue, spike_queue, running,
+                            max_time_ms, save, write_queue))
   spike_gen_proc.start()
+
+  imgwrite_proc = None
+  if save:
+    imgwrite_proc = Process(target=writing_thread,
+                            args=(write_queue, fps))
+    imgwrite_proc.start()
   
   
   # -------------------------------------------------------------------- #
   # main loop                                                            #
   
   curr     = np.zeros(shape,     dtype=int16)
-  ref      = 128*np.ones(shape,  dtype=int16)
+  ref      = 64*np.ones(shape,  dtype=int16)
 
-  
+  i = 0
+
   while(running.value == 1):
     # get an image from video source0
     valid_img, curr = video_dev.read(ref)
-  
+    curr = cv2.resize(curr, (width, height))
     if not valid_img:
       if max_cycles == 1:
         print("Finished the specified single cycle")
       else:
         print("Finished the specified %i cycles" %max_cycles)
       break
-  
+    
     img_queue.put(curr)
-    time.sleep(1)
   
   img_queue.put(None)
   spike_gen_proc.join()
@@ -239,6 +265,14 @@ def main():
   spike_emitting_proc.join()
   print("emission thread stopped")
   
+  # if not save, there will be name error
+  try:
+    write_queue.put(None)
+    imgwrite_proc.join()
+    print("writing thread stopped")
+  except NameError:
+    pass
+
   if video_dev is not None:
     video_dev.release()
   

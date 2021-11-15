@@ -56,17 +56,20 @@ def grab_first(dev, res):
   return img, new_width, new_height, col_from, col_to
 
 def grab_frame(dev, width, height, col_from, col_to):
-  _, raw = dev.read()
-  img = cv2.resize(cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY).astype(int16),
-               (width, height))[:, col_from:col_to]
+  ret, raw = dev.read()
+  if ret:
+    img = cv2.resize(cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY).astype(int16),
+                (width, height))[:, col_from:col_to]
 
-  return img
+    return img
+  return False
 
 
 # -------------------------------------------------------------------- #
 # process image thread function                                        #
 
-def processing_thread(img_queue, spike_queue, running, max_time_ms):
+def processing_thread(img_queue, spike_queue, running, 
+                      max_time_ms, save=False, write_queue=None):
   #~ start_time = time.time()
   WINDOW_NAME = 'spikes'
   cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_AUTOSIZE)
@@ -86,6 +89,7 @@ def processing_thread(img_queue, spike_queue, running, max_time_ms):
   pos_spks = None
   neg_spks = None
   max_diff = 0
+
 
   while True:
     img = img_queue.get()
@@ -126,6 +130,8 @@ def processing_thread(img_queue, spike_queue, running, max_time_ms):
     
     spk_img[:] = gs.render_frame(spikes, img, cam_res, cam_res, polarity)
     cv2.imshow (WINDOW_NAME, spk_img.astype(uint8))  
+    if save:
+      write_queue.put(spk_img.astype(uint8))
     if cv2.waitKey(1) & 0xFF == ord('q'):
       running.value = 0
       break
@@ -143,6 +149,17 @@ def processing_thread(img_queue, spike_queue, running, max_time_ms):
   cv2.destroyAllWindows()  
   cv2.waitKey(1)
   running.value = 0
+
+def writing_thread(write_queue, fps):
+  fourcc = cv2.VideoWriter_fourcc(*'XVID')
+  out = cv2.VideoWriter('output/output.avi',fourcc, fps, (width, height))
+  while True:
+    img = write_queue.get()
+    if img is None:
+      break
+    # cv2.imwrite(f'output/img-{i:03d}.jpg', img)
+    out.write(img)
+  out.release()
 
 
 # -------------------------------------------------------------------- #
@@ -215,7 +232,8 @@ def main():
   # -------------------------------------------------------------------- #
   # camera/frequency related                                             #
   
-  video_dev = cv2.VideoCapture(video_dev_id) # webcam
+  video_dev = cv2.VideoCapture(video_dev_id) # webcam or any path
+  save = True # save to file or not
   #~ video_dev = cv2.VideoCapture('./120fps HFR Sample.mp4') # webcam
   
   #ps3 eyetoy can do 125fps
@@ -241,10 +259,19 @@ def main():
   spike_emitting_proc.start()
   
   img_queue = Queue()
+  write_queue = Queue()
   #~ spike_gen_proc = Process(target=self.process_frame, args=(img_queue,))
   spike_gen_proc = Process(target=processing_thread, 
-                           args=(img_queue, spike_queue, running, max_time_ms))
+                           args=(img_queue, spike_queue, running,
+                            max_time_ms, save, write_queue))
   spike_gen_proc.start()
+
+  imgwrite_proc = None
+
+  if save:
+    imgwrite_proc = Process(target=writing_thread,
+                            args=(write_queue, fps))
+    imgwrite_proc.start()
 
 
   # -------------------------------------------------------------------- #
@@ -259,7 +286,8 @@ def main():
       is_first_pass = False
     else:
       curr = grab_frame(video_dev, scale_width,  scale_height, col_from, col_to)
-    
+      if curr is False:
+        break
     img_queue.put(curr)
     
   
@@ -270,6 +298,14 @@ def main():
   spike_queue.put(None)
   spike_emitting_proc.join()
   print("emission thread stopped")
+  
+  # if not save, there will be name error
+  try:
+    write_queue.put(None)
+    imgwrite_proc.join()
+    print("writing thread stopped")
+  except NameError:
+    pass
   
   if video_dev is not None:
     video_dev.release()
