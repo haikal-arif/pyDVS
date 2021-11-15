@@ -157,6 +157,7 @@ def writing_thread(write_queue, fps):
     img = write_queue.get()
     if img is None:
       break
+
     # cv2.imwrite(f'output/img-{i:03d}.jpg', img)
     out.write(img)
   out.release()
@@ -187,6 +188,8 @@ def emitting_thread(spike_queue, running):
 parser = argparse.ArgumentParser()
 parser.add_argument("--video_id", default='0', required=False, type=str)
 parser.add_argument("--res", default=MODE_128, required=False, type=int)
+parser.add_argument("--save", default=False, required=False, type=int)
+
 args = parser.parse_args()
 video_dev_id = args.video_id
 if len(video_dev_id) < 4:
@@ -198,6 +201,7 @@ cam_res = int(mode)
 width = cam_res # square output
 height = cam_res
 shape = (height, width)
+save = args.save in ['true', '1', 't', 'y', 'yes']
 
 data_shift = uint8( log2(cam_res) )
 up_down_shift = uint8(2*data_shift)
@@ -233,7 +237,6 @@ def main():
   # camera/frequency related                                             #
   
   video_dev = cv2.VideoCapture(video_dev_id) # webcam or any path
-  save = True # save to file or not
   #~ video_dev = cv2.VideoCapture('./120fps HFR Sample.mp4') # webcam
   
   #ps3 eyetoy can do 125fps
@@ -304,7 +307,7 @@ def main():
     write_queue.put(None)
     imgwrite_proc.join()
     print("writing thread stopped")
-  except NameError:
+  except NameError or AttributeError:
     pass
   
   if video_dev is not None:
