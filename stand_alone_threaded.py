@@ -188,7 +188,7 @@ def emitting_thread(spike_queue, running):
 parser = argparse.ArgumentParser()
 parser.add_argument("--video_id", default='0', required=False, type=str)
 parser.add_argument("--res", default=MODE_128, required=False, type=int)
-parser.add_argument("--save", default=False, required=False, type=int)
+parser.add_argument("--save", default="False", required=False, type=str)
 
 args = parser.parse_args()
 video_dev_id = args.video_id
